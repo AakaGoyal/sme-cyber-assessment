@@ -1,0 +1,13 @@
+[theme]
+base = "light"             # "dark" for dark mode if you prefer
+primaryColor = "#007BFF"   # Accent color (blue)
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F8F9FA"
+textColor = "#0E1117"
+font = "sans serif"
+
+[server]
+maxUploadSize = 50
+
+[client]
+toolbarMode = "minimal"
