@@ -1,12 +1,23 @@
-import json
+"""
+SME Self-Assessment Wizard (Streamlit)
+- Stage 1: Intake + Initial Assessment (context)
+- Stage 2: Cybersecurity Posture (controls)
+- Results: Domain traffic lights, strengths, and top fixes + export
+
+Run:
+  pip install streamlit pandas
+  streamlit run app.py
+"""
+
 from io import StringIO
+import json
 from typing import Dict, Any, List, Tuple
 
 import pandas as pd
 import streamlit as st
 
 # =========================================================
-# Page & global styles
+# Page & Styles
 # =========================================================
 st.set_page_config(page_title="SME Assessment Wizard", page_icon="🧭", layout="wide")
 
@@ -14,11 +25,7 @@ CSS = """
 <style>
 .card{border:1px solid #eaeaea;border-radius:14px;padding:16px;background:#fff}
 .qtitle{font-size:1.1rem;font-weight:600;margin:0 0 6px 0}
-.qtip{font-size:.9rem;color:#666;margin-top:4px}
 .small{font-size:.9rem;color:#666}
-.footer{display:flex;gap:8px}
-.footer .stButton>button{width:100%;border-radius:10px}
-.header-phase{color:#555;font-weight:500}
 .badge{display:inline-block;padding:4px 10px;border-radius:999px;font-weight:600}
 .red{background:#ffe7e7;border:1px solid #ffd0d0;color:#b10000}
 .amber{background:#fff3cd;border:1px solid #ffe59a;color:#7a5b00}
@@ -33,8 +40,8 @@ st.markdown(CSS, unsafe_allow_html=True)
 # =========================================================
 # Session init
 # =========================================================
-def ss_init():
-    if stage"" not in st.session_state:"
+def ss_init() -> None:
+    if "stage" not in st.session_state:
         # intake -> qa -> done_initial -> cyber_qa -> cyber_results
         st.session_state.stage = "intake"
     if "profile" not in st.session_state:
@@ -56,10 +63,16 @@ def ss_init():
     if "cyber_idx" not in st.session_state:
         st.session_state.cyber_idx = 0
 
+def reset_all() -> None:
+    for k in ["stage", "profile", "answers", "idx", "cyber_answers", "cyber_idx"]:
+        if k in st.session_state:
+            del st.session_state[k]
+    ss_init()
+
 ss_init()
 
 # =========================================================
-# Initial Assessment – Question Bank (Stage 1)
+# Question Banks
 # =========================================================
 QUESTIONS: List[Dict[str, Any]] = [
     # Digital Footprint
@@ -166,9 +179,6 @@ QUESTIONS: List[Dict[str, Any]] = [
 ]
 TOTAL = len(QUESTIONS)
 
-# =========================================================
-# Cybersecurity Posture – Question Bank (Stage 2)
-# =========================================================
 CYBER_QUESTIONS: List[Dict[str, Any]] = [
     # Access & Accounts
     {
@@ -196,7 +206,6 @@ CYBER_QUESTIONS: List[Dict[str, Any]] = [
         "choices":["Yes, limited & reviewed","Partly","No / not sure"],
         "weights":[2,1,0]
     },
-
     # Devices
     {
         "id":"device_lock",
@@ -214,7 +223,6 @@ CYBER_QUESTIONS: List[Dict[str, Any]] = [
         "choices":["Yes, on all","Some / in progress","No / not sure"],
         "weights":[2,1,0]
     },
-
     # Data & Backups
     {
         "id":"backup_frequency",
@@ -233,7 +241,6 @@ CYBER_QUESTIONS: List[Dict[str, Any]] = [
         "choices":["Yes, tested in last 6 months","Longer than 6 months","Never / not sure"],
         "weights":[2,1,0]
     },
-
     # Email & Awareness
     {
         "id":"phishing_training",
@@ -251,7 +258,6 @@ CYBER_QUESTIONS: List[Dict[str, Any]] = [
         "choices":["Yes, managed controls","Basic filtering only","No / not sure"],
         "weights":[2,1,0]
     },
-
     # Updates & AV
     {
         "id":"patching",
@@ -269,7 +275,6 @@ CYBER_QUESTIONS: List[Dict[str, Any]] = [
         "choices":["Yes, on all devices","Some devices","No / not sure"],
         "weights":[2,1,0]
     },
-
     # Response & Continuity
     {
         "id":"ir_contacts",
@@ -302,11 +307,6 @@ def digital_dependency_score(ans: Dict[str, Any]) -> int:
 
 def dd_text(v:int) -> str:
     return "Low" if v <= 2 else ("Medium" if v <= 5 else "High")
-
-def reset_all():
-    for k in ["stage","profile","answers","idx","cyber_answers","cyber_idx"]:
-        if k in st.session_state: del st.session_state[k]
-    ss_init()
 
 def traffic_light(pct: float) -> Tuple[str, str]:
     if pct >= 75: return ("green","Good")
@@ -342,7 +342,7 @@ def overall_score(domain_scores: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     return {"score": round(avg), "colour": colour, "label": label}
 
 def add_action_cards(initial: Dict[str, Any], cyber: Dict[str, Any]) -> Tuple[List[str], List[str]]:
-    """Produce 'What you're doing well' and 'Top fixes' bullets from answers."""
+    """Return (strengths, fixes) based on answers."""
     good, fixes = [], []
     A = cyber
 
@@ -383,12 +383,15 @@ def add_action_cards(initial: Dict[str, Any], cyber: Dict[str, Any]) -> Tuple[Li
     if not chose("admin_rights", 0):
         fixes.append("Restrict **admin rights**; use separate admin accounts and review quarterly.")
 
-    # Tweak with Initial Assessment context
+    # Context tweak
     if initial.get("breach_contact") == "Not really sure" and \
        "Create a **one-page incident checklist** with internal & vendor contacts." not in fixes:
         fixes.insert(0, "Add **vendor breach contacts** to your incident checklist (host, payments, accountant).")
 
     return good[:8], fixes[:10]
+
+def badge(colour: str, text: str) -> str:
+    return f'<span class="badge {colour}">{text}</span>'
 
 # =========================================================
 # Sidebar (live snapshot)
@@ -400,7 +403,7 @@ with st.sidebar:
         f"**Business:** {p.get('business_name') or '—'}  \n"
         f"**Industry:** {p.get('industry') or '—'}  \n"
         f"**People:** {p.get('headcount') or '—'}  •  **Years:** {p.get('years') or '—'}  •  **Turnover:** {p.get('turnover') or '—'}  \n"
-        f"**Work mode:** {p.get('work_mode') or '—'}  \n"
+        f"**Work mode:** {p.get('work_mode') or '—'}"
     )
     st.markdown("---")
     dd = dd_text(digital_dependency_score(st.session_state.answers))
@@ -454,7 +457,7 @@ if st.session_state.stage == "intake":
         st.rerun()
 
 # =========================================================
-# Stage 1: One-question-per-page (Initial Assessment)
+# Stage 1: Initial Assessment (one per page)
 # =========================================================
 if st.session_state.stage == "qa":
     idx = st.session_state.idx
@@ -493,8 +496,7 @@ if st.session_state.stage == "qa":
     col_prev, col_skip, col_next = st.columns([1,1,1])
     with col_prev:
         if st.button("← Back", use_container_width=True, disabled=(idx == 0)):
-            st.session_state.idx = max(idx - 1, 0)
-            st.rerun()
+            st.session_state.idx = max(idx - 1, 0); st.rerun()
     with col_skip:
         if st.button("Skip", use_container_width=True):
             next_idx = idx + 1
@@ -541,8 +543,7 @@ if st.session_state.stage == "done_initial":
             highlights.append("You handle personal data — consider privacy and retention basics.")
         if not highlights:
             highlights.append("Operational footprint looks light; next step focuses on essential hygiene.")
-        for h in highlights:
-            st.markdown(f"- {h}")
+        for h in highlights: st.markdown(f"- {h}")
 
     with colB:
         st.markdown("**Potential blind spots**")
@@ -555,8 +556,7 @@ if st.session_state.stage == "done_initial":
             blindspots.append("Low confidence — training and basic controls will lift resilience quickly.")
         if not blindspots:
             blindspots.append("Solid baseline. Next, validate backups, MFA, and incident basics.")
-        for b in blindspots:
-            st.markdown(f"- {b}")
+        for b in blindspots: st.markdown(f"- {b}")
 
     st.info("Next: Cybersecurity Posture (controls like MFA, backups, patching, awareness, incident response).")
     if st.button("→ Continue to Cybersecurity Posture", type="primary"):
@@ -588,8 +588,7 @@ if st.session_state.stage == "cyber_qa":
     col_prev, col_skip, col_next = st.columns([1,1,1])
     with col_prev:
         if st.button("← Back", use_container_width=True, disabled=(i == 0)):
-            st.session_state.cyber_idx = max(i - 1, 0)
-            st.rerun()
+            st.session_state.cyber_idx = max(i - 1, 0); st.rerun()
     with col_skip:
         if st.button("Skip", use_container_width=True):
             next_i = i + 1
@@ -608,15 +607,12 @@ if st.session_state.stage == "cyber_qa":
             st.rerun()
 
 # =========================================================
-# Stage 2: Results – Traffic Lights + Action Cards
+# Stage 2: Results – KPIs + Actions + Export
 # =========================================================
 if st.session_state.stage == "cyber_results":
     st.success("Cybersecurity Posture assessment complete.")
     scores = compute_domain_scores(st.session_state.cyber_answers)
     overall = overall_score(scores)
-
-    def badge(colour, text):
-        return f'<span class="badge {colour}">{text}</span>'
 
     # Overall KPI
     st.markdown('<div class="kpi">', unsafe_allow_html=True)
@@ -655,7 +651,7 @@ if st.session_state.stage == "cyber_results":
         else:
             st.write("Great baseline! Keep policies current and review quarterly.")
 
-    # -------- Export (JSON / CSV) ----------
+    # Export
     st.markdown("---")
     st.info("Tip: capture this page as PDF for your records, or download JSON/CSV below.")
     export_payload = {
@@ -670,20 +666,15 @@ if st.session_state.stage == "cyber_results":
     st.download_button("⬇️ Download JSON", data=json.dumps(export_payload, indent=2),
                        file_name="sme_assessment_results.json", mime="application/json")
 
-    # CSV (domain scores only)
     df = pd.DataFrame([{"Domain": d, "Score": v["score"], "Label": v["label"]} for d, v in scores.items()])
-    csv_buf = StringIO()
-    df.to_csv(csv_buf, index=False)
+    csv_buf = StringIO(); df.to_csv(csv_buf, index=False)
     st.download_button("⬇️ Download CSV (domain scores)", data=csv_buf.getvalue(),
                        file_name="sme_domain_scores.csv", mime="text/csv")
 
     c1, c2 = st.columns([1,1])
     with c1:
         if st.button("← Review answers"):
-            st.session_state.stage = "cyber_qa"
-            st.session_state.cyber_idx = 0
-            st.rerun()
+            st.session_state.stage = "cyber_qa"; st.session_state.cyber_idx = 0; st.rerun()
     with c2:
         if st.button("Restart whole assessment"):
-            reset_all()
-            st.rerun()
+            reset_all(); st.rerun()
