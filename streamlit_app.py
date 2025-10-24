@@ -1,8 +1,8 @@
 """
-SME Self-Assessment Wizard (Streamlit)
+SME Self-Assessment Wizard — Scenario Edition
 - Stage 1: Intake + Initial Assessment (context)
-- Stage 2: Cybersecurity Posture (controls)
-- Results: Domain traffic lights, strengths, and top fixes + export
+- Stage 2: Micro-simulations (choose actions & cues; confidence)
+- Results: Domain traffic-lights, strengths, fixes, and export
 
 Run:
   pip install streamlit pandas
@@ -33,6 +33,7 @@ CSS = """
 .kpi{border-radius:12px;border:1px solid #eee;padding:14px;background:#fafafa}
 .kpi h4{margin:.1rem 0 .4rem 0}
 ul.tight>li{margin-bottom:.3rem}
+.evidence{background:#fafafa;border:1px dashed #e3e3e3;border-radius:10px;padding:10px;margin:6px 0}
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -42,7 +43,7 @@ st.markdown(CSS, unsafe_allow_html=True)
 # =========================================================
 def ss_init() -> None:
     if "stage" not in st.session_state:
-        # intake -> qa -> done_initial -> cyber_qa -> cyber_results
+        # intake -> qa -> done_initial -> sim_qa -> sim_results
         st.session_state.stage = "intake"
     if "profile" not in st.session_state:
         st.session_state.profile = {
@@ -54,25 +55,24 @@ def ss_init() -> None:
             "turnover": "",
             "work_mode": "",
         }
-    if "answers" not in st.session_state:
+    if "answers" not in st.session_state:  # stage 1 answers
         st.session_state.answers: Dict[str, Any] = {}
     if "idx" not in st.session_state:
         st.session_state.idx = 0
-    if "cyber_answers" not in st.session_state:
-        st.session_state.cyber_answers: Dict[str, Any] = {}
-    if "cyber_idx" not in st.session_state:
-        st.session_state.cyber_idx = 0
+    if "sim_idx" not in st.session_state:
+        st.session_state.sim_idx = 0
+    if "sim_answers" not in st.session_state:  # scenario responses
+        st.session_state.sim_answers: Dict[str, Any] = {}
 
 def reset_all() -> None:
-    for k in ["stage", "profile", "answers", "idx", "cyber_answers", "cyber_idx"]:
-        if k in st.session_state:
-            del st.session_state[k]
+    for k in ["stage","profile","answers","idx","sim_idx","sim_answers"]:
+        if k in st.session_state: del st.session_state[k]
     ss_init()
 
 ss_init()
 
 # =========================================================
-# Question Banks
+# Stage 1 — Initial Context Questions
 # =========================================================
 QUESTIONS: List[Dict[str, Any]] = [
     # Digital Footprint
@@ -82,7 +82,7 @@ QUESTIONS: List[Dict[str, Any]] = [
         "text": "Do you sell products or deliver services online?",
         "type": "choice",
         "choices": ["Yes – on my own website","Yes – via marketplaces (Amazon/Etsy)","No – mostly offline"],
-        "tip": "This helps us understand your online exposure and dependencies."
+        "tip": "Helps estimate online exposure and dependencies."
     },
     {
         "id": "data_types",
@@ -90,7 +90,7 @@ QUESTIONS: List[Dict[str, Any]] = [
         "text": "Do you store customer or employee information (e.g., emails, invoices, payment info)?",
         "type": "choice",
         "choices": ["Yes","No"],
-        "tip": "Handling personal data increases your duty of care and regulatory exposure."
+        "tip": "Personal data handling increases duty of care and regulatory exposure."
     },
     {
         "id": "tools_regular",
@@ -101,203 +101,30 @@ QUESTIONS: List[Dict[str, Any]] = [
             "Email","Accounting/finance software","CRM or client database",
             "Cloud storage (Google Drive/OneDrive etc.)","Online payment system","Website or webshop"
         ],
-        "tip": "This identifies where your critical information and daily operations live."
+        "tip": "Locates critical processes and information."
     },
     # IT Ownership
-    {
-        "id": "website_owner",
-        "phase": "IT Ownership",
-        "text": "Who looks after your website and online systems?",
-        "type": "choice",
-        "choices": ["I do it myself","Someone on my team","An external company or freelancer"]
-    },
-    {
-        "id": "it_support",
-        "phase": "IT Ownership",
-        "text": "Who takes care of your computers, email and systems when something needs setup/fixing?",
-        "type": "choice",
-        "choices": ["I do","A friend/freelancer","An IT company","In-house IT team"]
-    },
-    {
-        "id": "setup_by",
-        "phase": "IT Ownership",
-        "text": "Did you personally set up your main systems (email, website, backups)?",
-        "type": "choice",
-        "choices": ["Yes, mostly me","Shared effort","Someone else handled it"]
-    },
-    {
-        "id": "asset_list",
-        "phase": "IT Ownership",
-        "text": "Do you have a clear list of systems, accounts and devices you use?",
-        "type": "choice",
-        "choices": ["Yes, documented","Rough idea","Not really"]
-    },
+    {"id":"website_owner","phase":"IT Ownership","text":"Who looks after your website and online systems?","type":"choice",
+     "choices":["I do it myself","Someone on my team","An external company or freelancer"]},
+    {"id":"it_support","phase":"IT Ownership","text":"Who takes care of computers, email and systems when something needs setup/fixing?","type":"choice",
+     "choices":["I do","A friend/freelancer","An IT company","In-house IT team"]},
+    {"id":"setup_by","phase":"IT Ownership","text":"Did you personally set up your main systems (email, website, backups)?","type":"choice",
+     "choices":["Yes, mostly me","Shared effort","Someone else handled it"]},
+    {"id":"asset_list","phase":"IT Ownership","text":"Do you have a clear list of systems, accounts and devices you use?","type":"choice",
+     "choices":["Yes, documented","Rough idea","Not really"]},
     # Partners
-    {
-        "id": "third_parties",
-        "phase": "Partners",
-        "text": "Do you work with external partners who handle your data or systems (host, accountant, logistics, marketing tools)?",
-        "type": "choice",
-        "choices": ["Yes","No"]
-    },
-    {
-        "id": "partner_count",
-        "phase": "Partners",
-        "text": "How many key partners or providers do you rely on?",
-        "type": "choice",
-        "choices": ["0–2","3–5","6+"]
-    },
-    {
-        "id": "breach_contact",
-        "phase": "Partners",
-        "text": "If a main partner had a breach, would you know who to contact and what to do?",
-        "type": "choice",
-        "choices": ["Yes – I know who to reach","Not really sure"]
-    },
+    {"id":"third_parties","phase":"Partners","text":"Do external partners handle your data/systems (host, accountant, logistics, marketing tools)?","type":"choice","choices":["Yes","No"]},
+    {"id":"partner_count","phase":"Partners","text":"How many key partners do you rely on?","type":"choice","choices":["0–2","3–5","6+"]},
+    {"id":"breach_contact","phase":"Partners","text":"If a main partner had a breach, would you know who to contact and what to do?","type":"choice","choices":["Yes – I know who to reach","Not really sure"]},
     # Confidence
-    {
-        "id": "confidence",
-        "phase": "Confidence",
-        "text": "How prepared would you feel if a cyberattack or data loss hit tomorrow?",
-        "type": "choice",
-        "choices": ["Not at all","Somewhat","Fairly confident","Very confident"]
-    },
-    {
-        "id": "past_incidents",
-        "phase": "Confidence",
-        "text": "Have you experienced a cybersecurity issue before (e.g., phishing, data loss, locked computer)?",
-        "type": "choice",
-        "choices": ["Yes","No","Not sure"]
-    },
-    {
-        "id": "know_who_to_call",
-        "phase": "Confidence",
-        "text": "Do you know who to call or where to get help if something happened?",
-        "type": "choice",
-        "choices": ["Yes","No"]
-    },
+    {"id":"confidence","phase":"Confidence","text":"How prepared would you feel if a cyberattack or data loss hit tomorrow?","type":"choice",
+     "choices":["Not at all","Somewhat","Fairly confident","Very confident"]},
+    {"id":"past_incidents","phase":"Confidence","text":"Have you experienced a cybersecurity issue before (e.g., phishing, data loss, locked computer)?","type":"choice",
+     "choices":["Yes","No","Not sure"]},
+    {"id":"know_who_to_call","phase":"Confidence","text":"Do you know who to call or where to get help if something happened?","type":"choice","choices":["Yes","No"]},
 ]
 TOTAL = len(QUESTIONS)
 
-CYBER_QUESTIONS: List[Dict[str, Any]] = [
-    # Access & Accounts
-    {
-        "id":"mfa_all",
-        "domain":"Access & Accounts",
-        "text":"Do all important accounts (email, admin portals, cloud storage, payment) use MFA?",
-        "type":"choice",
-        "choices":["Yes, for all important accounts","Yes, for some","No / not sure"],
-        "weights":[2,1,0],
-        "tip":"MFA blocks >95% of account-takeover attempts."
-    },
-    {
-        "id":"shared_accounts",
-        "domain":"Access & Accounts",
-        "text":"Do people share logins, or does everyone have their own account?",
-        "type":"choice",
-        "choices":["Everyone has their own","Some shared accounts","Mostly shared accounts"],
-        "weights":[2,1,0]
-    },
-    {
-        "id":"admin_rights",
-        "domain":"Access & Accounts",
-        "text":"Are admin rights limited (used only when needed) and audited?",
-        "type":"choice",
-        "choices":["Yes, limited & reviewed","Partly","No / not sure"],
-        "weights":[2,1,0]
-    },
-    # Devices
-    {
-        "id":"device_lock",
-        "domain":"Devices",
-        "text":"Are all laptops/phones protected with password/biometrics + auto-lock?",
-        "type":"choice",
-        "choices":["Yes, all","Most","No / not sure"],
-        "weights":[2,1,0]
-    },
-    {
-        "id":"disk_encryption",
-        "domain":"Devices",
-        "text":"Is full-disk encryption enabled on business laptops/desktops?",
-        "type":"choice",
-        "choices":["Yes, on all","Some / in progress","No / not sure"],
-        "weights":[2,1,0]
-    },
-    # Data & Backups
-    {
-        "id":"backup_frequency",
-        "domain":"Data & Backups",
-        "text":"How often are business-critical files backed up?",
-        "type":"choice",
-        "choices":["Daily or continuous","Weekly","Rarely / never / not sure"],
-        "weights":[2,1,0],
-        "tip":"Follow 3-2-1: 3 copies, 2 media, 1 offsite/immutable."
-    },
-    {
-        "id":"backup_restore_test",
-        "domain":"Data & Backups",
-        "text":"Do you periodically test restoring backups?",
-        "type":"choice",
-        "choices":["Yes, tested in last 6 months","Longer than 6 months","Never / not sure"],
-        "weights":[2,1,0]
-    },
-    # Email & Awareness
-    {
-        "id":"phishing_training",
-        "domain":"Email & Awareness",
-        "text":"Do staff have regular phishing/security awareness training?",
-        "type":"choice",
-        "choices":["Yes, at least yearly","Ad-hoc / once","No / not sure"],
-        "weights":[2,1,0]
-    },
-    {
-        "id":"email_filters",
-        "domain":"Email & Awareness",
-        "text":"Do you have spam/malware filtering and link protection on email?",
-        "type":"choice",
-        "choices":["Yes, managed controls","Basic filtering only","No / not sure"],
-        "weights":[2,1,0]
-    },
-    # Updates & AV
-    {
-        "id":"patching",
-        "domain":"Updates & AV",
-        "text":"Are operating systems and apps patched automatically within ~14 days?",
-        "type":"choice",
-        "choices":["Yes, automated","Partly manual","No / not sure"],
-        "weights":[2,1,0]
-    },
-    {
-        "id":"av_edr",
-        "domain":"Updates & AV",
-        "text":"Is reputable antivirus/EDR installed and centrally monitored?",
-        "type":"choice",
-        "choices":["Yes, on all devices","Some devices","No / not sure"],
-        "weights":[2,1,0]
-    },
-    # Response & Continuity
-    {
-        "id":"ir_contacts",
-        "domain":"Response & Continuity",
-        "text":"If something goes wrong, do you have a simple incident checklist and contacts?",
-        "type":"choice",
-        "choices":["Yes, documented","Partial / informal","No / not sure"],
-        "weights":[2,1,0]
-    },
-    {
-        "id":"vendor_breach_flow",
-        "domain":"Response & Continuity",
-        "text":"If a vendor is breached, do you know their contact & steps to take?",
-        "type":"choice",
-        "choices":["Yes, clear contacts","Some idea","No / not sure"],
-        "weights":[2,1,0]
-    },
-]
-CYBER_TOTAL = len(CYBER_QUESTIONS)
-
-# =========================================================
-# Helpers
-# =========================================================
 def digital_dependency_score(ans: Dict[str, Any]) -> int:
     s = 0
     if ans.get("sell_online","").startswith("Yes"): s += 2
@@ -308,90 +135,335 @@ def digital_dependency_score(ans: Dict[str, Any]) -> int:
 def dd_text(v:int) -> str:
     return "Low" if v <= 2 else ("Medium" if v <= 5 else "High")
 
+# =========================================================
+# Stage 2 — Scenarios (micro-simulations)
+# =========================================================
+# Each option has text, tag, and weight (risk/benefit). max_select limits choices.
+SCENARIOS: List[Dict[str, Any]] = [
+    {
+        "id": "s1_invoice",
+        "title": "Supplier invoice change",
+        "narrative": "A supplier emails to 'update their bank details' for an unpaid invoice. There's a 'View invoice' button.",
+        "evidence": [
+            "Reply-To: acme-billing@acme-supplies.co (display name: Acme Supplies)",
+            "Link preview: acme-support-billing.com/invoices/...",
+            "Tone: polite, a little urgent; mentions late fees"
+        ],
+        "tasks": {
+            "cues": {
+                "prompt": "Which details make you pause? (pick up to 3)",
+                "options": [
+                    {"text":"New bank details + urgency","tag":"cue_new_iban","weight":2},
+                    {"text":"Reply-To differs from display name","tag":"cue_replyto","weight":2},
+                    {"text":"Link domain not the usual portal","tag":"cue_domain","weight":2},
+                    {"text":"Looks fine to me","tag":"cue_none","weight":-2},
+                ],
+                "max_select": 3
+            },
+            "actions": {
+                "prompt": "What would you do first? (pick up to 2)",
+                "options": [
+                    {"text":"Call supplier via number in finance contacts","tag":"oob_verify","weight":3},
+                    {"text":"Reply to the email to confirm","tag":"reply_email","weight":-2},
+                    {"text":"Ask finance to cross-check IBAN in ERP","tag":"crosscheck_iban","weight":2},
+                    {"text":"Click the button and log in to verify","tag":"click_link","weight":-3},
+                    {"text":"Hold the payment and open a ticket","tag":"hold_and_ticket","weight":2},
+                ],
+                "max_select": 2
+            },
+            "confidence": {"prompt":"How confident are you?", "range":[0,100], "default":60}
+        },
+        "domain_map": {"Email & Awareness":0.5,"Response & Continuity":0.5},
+        "hint_fix": "Maintain a verified supplier contact list and require two-channel verification for bank detail changes."
+    },
+    {
+        "id": "s2_ceo",
+        "title": "CEO urgent payment request",
+        "narrative": "A late-evening message from a senior exec asks you to make a confidential, urgent transfer and to bypass the usual approvals.",
+        "evidence": [
+            "Sent from: gmail.com address; signature looks copied",
+            "‘Handle personally’ and ‘urgent’ language",
+            "Mentions a supplier you recognise"
+        ],
+        "tasks": {
+            "cues": {
+                "prompt":"What looks off? (pick up to 3)",
+                "options":[
+                    {"text":"Non-corporate sender address","tag":"cue_sender","weight":2},
+                    {"text":"Bypass normal approvals","tag":"cue_bypass","weight":2},
+                    {"text":"Unusual time and secrecy","tag":"cue_timesecrecy","weight":2},
+                    {"text":"Nothing stands out","tag":"cue_none","weight":-2},
+                ],
+                "max_select":3
+            },
+            "actions":{
+                "prompt":"What do you do? (pick up to 2)",
+                "options":[
+                    {"text":"Verify via known company channel","tag":"oob_verify","weight":3},
+                    {"text":"Proceed due to authority","tag":"comply_authority","weight":-3},
+                    {"text":"Log the event and notify finance lead","tag":"log_and_notify","weight":2},
+                    {"text":"Ask for details by replying to the same email","tag":"reply_email","weight":-2},
+                ],
+                "max_select":2
+            },
+            "confidence":{"prompt":"How confident are you?", "range":[0,100], "default":65}
+        },
+        "domain_map":{"Governance":0.3,"Response & Continuity":0.7},
+        "hint_fix":"Document payment approvals; never bypass without two approvers and an out-of-band check."
+    },
+    {
+        "id": "s3_reset",
+        "title": "Password-reset alert",
+        "narrative": "You receive a ‘reset your password’ alert after ‘unusual sign-in activity’.",
+        "evidence": [
+            "Shortened URL; padlock icon; generic greeting",
+            "Domain looks close to your vendor but isn’t exact"
+        ],
+        "tasks":{
+            "cues":{
+                "prompt":"Spot the cues (pick up to 3)",
+                "options":[
+                    {"text":"Shortened or mismatched URL","tag":"cue_url","weight":2},
+                    {"text":"Generic greeting / odd branding","tag":"cue_generic","weight":2},
+                    {"text":"Time pressure to click","tag":"cue_pressure","weight":2},
+                    {"text":"Looks legit","tag":"cue_none","weight":-2},
+                ],
+                "max_select":3
+            },
+            "actions":{
+                "prompt":"What’s your move? (pick up to 2)",
+                "options":[
+                    {"text":"Navigate to the site yourself (no link)","tag":"nav_direct","weight":3},
+                    {"text":"Use the report-phish button","tag":"report_button","weight":2},
+                    {"text":"Click the link and log in to check","tag":"click_link","weight":-3},
+                    {"text":"Reply asking if this is real","tag":"reply_email","weight":-2},
+                ],
+                "max_select":2
+            },
+            "confidence":{"prompt":"How confident are you?", "range":[0,100], "default":70}
+        },
+        "domain_map":{"Access & Accounts":0.5,"Email & Awareness":0.5},
+        "hint_fix":"Teach ‘navigate, don’t click’; enable an easy report button."
+    },
+    {
+        "id": "s4_laptop",
+        "title": "Laptop lost on the train",
+        "narrative": "A staff laptop is left on a train during a business trip.",
+        "evidence": [
+            "The device holds email and synced files",
+            "Unsure whether disk encryption is on"
+        ],
+        "tasks":{
+            "cues":{
+                "prompt":"What matters most here? (pick up to 2)",
+                "options":[
+                    {"text":"Data may be accessible if not encrypted","tag":"cue_encrypt","weight":2},
+                    {"text":"Tokens/sessions may still be valid","tag":"cue_tokens","weight":2},
+                    {"text":"We can probably ignore if it’s passworded","tag":"cue_ignore","weight":-2},
+                ],
+                "max_select":2
+            },
+            "actions":{
+                "prompt":"What do you do first? (pick up to 2)",
+                "options":[
+                    {"text":"Trigger remote wipe / lock","tag":"remote_wipe","weight":3},
+                    {"text":"Revoke tokens & reset credentials","tag":"revoke_tokens","weight":2},
+                    {"text":"Wait a week to see if it turns up","tag":"wait_and_see","weight":-3},
+                    {"text":"Log the incident and notify insurer","tag":"log_and_notify","weight":2},
+                ],
+                "max_select":2
+            },
+            "confidence":{"prompt":"How confident are you?", "range":[0,100], "default":60}
+        },
+        "domain_map":{"Devices":0.6,"Response & Continuity":0.4},
+        "hint_fix":"Enforce full-disk encryption and keep MDM ready for remote lock/wipe."
+    },
+    {
+        "id":"s5_share",
+        "title":"Cloud sharing mishap",
+        "narrative":"A public link to a cloud folder with recent invoices was shared with a client by mistake.",
+        "evidence":[
+            "Link has no expiry; folder contains customer details",
+            "Default sharing allows ‘Anyone with the link’"
+        ],
+        "tasks":{
+            "cues":{
+                "prompt":"What’s risky here? (pick up to 3)",
+                "options":[
+                    {"text":"Public link and no expiry","tag":"cue_public","weight":2},
+                    {"text":"Sensitive data present","tag":"cue_sensitive","weight":2},
+                    {"text":"Default ‘Anyone’ sharing","tag":"cue_default","weight":2},
+                    {"text":"No obvious risk","tag":"cue_none","weight":-2},
+                ],
+                "max_select":3
+            },
+            "actions":{
+                "prompt":"What would you do now? (pick up to 2)",
+                "options":[
+                    {"text":"Remove public access / rotate link","tag":"remove_public","weight":3},
+                    {"text":"Notify affected team and document","tag":"log_and_notify","weight":2},
+                    {"text":"Leave as is but monitor","tag":"do_nothing","weight":-3},
+                    {"text":"Review sharing defaults for the workspace","tag":"review_defaults","weight":2},
+                ],
+                "max_select":2
+            },
+            "confidence":{"prompt":"How confident are you?", "range":[0,100], "default":65}
+        },
+        "domain_map":{"Data & Backups":0.6,"Governance":0.4},
+        "hint_fix":"Set workspace sharing defaults; require expiry and least-privilege links."
+    },
+]
+SIM_TOTAL = len(SCENARIOS)
+
+DOMAINS = ["Access & Accounts","Devices","Data & Backups","Email & Awareness","Response & Continuity","Governance"]
+
+# ---------------------------------------------------------
+# Scoring helpers
+# ---------------------------------------------------------
 def traffic_light(pct: float) -> Tuple[str, str]:
     if pct >= 75: return ("green","Good")
     if pct >= 40: return ("amber","Needs work")
     return ("red","At risk")
 
-def compute_domain_scores(cyber_ans: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    domain_max: Dict[str,int] = {}
-    domain_sum: Dict[str,int] = {}
-    for q in CYBER_QUESTIONS:
-        dom = q["domain"]
-        domain_max[dom] = domain_max.get(dom, 0) + max(q["weights"])
-        sel = cyber_ans.get(q["id"])
-        if sel in q["choices"]:
-            idx = q["choices"].index(sel)
-            w = q["weights"][idx]
-        else:
-            w = 0
-        domain_sum[dom] = domain_sum.get(dom, 0) + w
+def score_selection(options: List[Dict[str,Any]], selected: List[str], max_select: int) -> float:
+    """Normalize to 0–100 by best possible positive picks."""
+    # score actual
+    score = 0
+    for s in selected:
+        for opt in options:
+            if opt["text"] == s:
+                score += opt["weight"]
+                break
+    # compute best possible
+    positives = sorted([max(0, opt["weight"]) for opt in options], reverse=True)
+    max_pos = sum(positives[:max_select]) if positives else 0
+    if max_pos <= 0:  # avoid div-by-zero; if all <=0 treat as 100 if no risky choices selected
+        return 100.0 if score >= 0 else 0.0
+    norm = max(0.0, score) / max_pos * 100.0
+    return max(0.0, min(100.0, norm))
 
+def evaluate_scenario(scn: Dict[str,Any], sel_cues: List[str], sel_actions: List[str], confidence: int):
+    cues_cfg = scn["tasks"]["cues"]; act_cfg = scn["tasks"]["actions"]
+    cues_score = score_selection(cues_cfg["options"], sel_cues, cues_cfg["max_select"])
+    act_score  = score_selection(act_cfg["options"],  sel_actions, act_cfg["max_select"])
+    base = (cues_score + act_score) / 2.0
+
+    # calibration: confident + wrong slightly penalises Awareness; confident + right slightly boosts
+    calib = 0.0
+    if base < 40 and confidence >= 70:
+        calib = -5.0
+    elif base >= 60 and confidence >= 70:
+        calib = +5.0
+
+    contrib = {d: base * p for d, p in scn["domain_map"].items()}
+    # apply calibration to a reasonable domain if present
+    if "Email & Awareness" in contrib:
+        contrib["Email & Awareness"] += calib
+
+    # build feedback
+    def pick(optlist, selected, good=True):
+        return [o["text"] for o in optlist if (o["text"] in selected and (o["weight"] > 0) == good)]
+    good_actions  = pick(act_cfg["options"], sel_actions, good=True)
+    risky_actions = pick(act_cfg["options"], sel_actions, good=False)
+    # missed top cues
+    pos_cues = [o for o in cues_cfg["options"] if o["weight"] > 0]
+    missed = [o["text"] for o in pos_cues if o["text"] not in sel_cues][:2]
+
+    # selected tags for later strengths/fixes
+    sel_tags = []
+    for txt in sel_actions:
+        for o in act_cfg["options"]:
+            if o["text"] == txt:
+                sel_tags.append(o["tag"])
+    return {
+        "cues_score": round(cues_score,1),
+        "actions_score": round(act_score,1),
+        "base": round(base,1),
+        "contrib": contrib,
+        "good_actions": good_actions,
+        "risky_actions": risky_actions,
+        "missed_cues": missed,
+        "hint_fix": scn.get("hint_fix",""),
+        "selected_tags": sel_tags
+    }
+
+def compute_domain_scores_from_sims(sim_answers: Dict[str,Any]) -> Dict[str, Dict[str, Any]]:
+    # domain_max is sum of 100*proportion per scenario answered
+    domain_max: Dict[str,float] = {}
+    domain_sum: Dict[str,float] = {d:0.0 for d in DOMAINS}
+
+    for scn in SCENARIOS:
+        # get selections; if unanswered, skip (max still counts to keep scale consistent? We'll only count answered)
+        resp = sim_answers.get(scn["id"])
+        # always count max so finished subset compares consistently across respondents
+        for d,p in scn["domain_map"].items():
+            domain_max[d] = domain_max.get(d,0.0) + 100.0 * p
+
+        if not resp:  # unanswered scenario: contributes zero
+            continue
+        ev = evaluate_scenario(scn, resp["cues"], resp["actions"], resp["confidence"])
+        for d, val in ev["contrib"].items():
+            domain_sum[d] = domain_sum.get(d,0.0) + max(0.0, val)
+
+    # generate traffic lights 0–100 per domain
     results: Dict[str, Dict[str, Any]] = {}
-    for dom in domain_max:
-        pct = (domain_sum[dom] / domain_max[dom]) * 100 if domain_max[dom] else 0
+    for d in DOMAINS:
+        maxv = domain_max.get(d, 0.0)
+        pct = (domain_sum[d] / maxv * 100.0) if maxv > 0 else 0.0
         colour, label = traffic_light(pct)
-        results[dom] = {"score": round(pct), "colour": colour, "label": label}
+        results[d] = {"score": round(pct), "colour": colour, "label": label}
     return results
 
 def overall_score(domain_scores: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-    if not domain_scores:
-        return {"score": 0, "colour": "red", "label": "At risk"}
-    avg = sum(v["score"] for v in domain_scores.values()) / len(domain_scores)
+    vals = [v["score"] for v in domain_scores.values() if v["score"] is not None]
+    if not vals:
+        return {"score":0,"colour":"red","label":"At risk"}
+    avg = sum(vals)/len(vals)
     colour, label = traffic_light(avg)
     return {"score": round(avg), "colour": colour, "label": label}
 
-def add_action_cards(initial: Dict[str, Any], cyber: Dict[str, Any]) -> Tuple[List[str], List[str]]:
-    """Return (strengths, fixes) based on answers."""
-    good, fixes = [], []
-    A = cyber
+# Strengths / Fixes from selected action tags
+def strengths_and_fixes(sim_answers: Dict[str,Any]) -> Tuple[List[str], List[str]]:
+    strengths, fixes = set(), set()
+    for scn in SCENARIOS:
+        resp = sim_answers.get(scn["id"])
+        if not resp: continue
+        tags = []
+        for t in scn["tasks"]["actions"]["options"]:
+            if t["text"] in resp["actions"]:
+                tags.append(t["tag"])
 
-    def chose(id_, i):
-        q = next(q for q in CYBER_QUESTIONS if q["id"] == id_)
-        sel = A.get(id_, "")
-        return q["choices"].index(sel) == i if sel in q["choices"] else False
+        # Strengths
+        if "oob_verify" in tags:
+            strengths.add("Uses out-of-band verification before money/account changes.")
+        if "hold_and_ticket" in tags or "log_and_notify" in tags:
+            strengths.add("Logs incidents and involves the right team quickly.")
+        if "nav_direct" in tags or "report_button" in tags:
+            strengths.add("Avoids risky links and uses the report-phish route.")
+        if "remote_wipe" in tags or "revoke_tokens" in tags:
+            strengths.add("Can contain device loss (remote wipe / token revocation).")
+        if "remove_public" in tags or "review_defaults" in tags:
+            strengths.add("Manages cloud sharing (remove public access, sensible defaults).")
 
-    # Strengths
-    if chose("mfa_all", 0): good.append("MFA enabled on important accounts.")
-    if chose("disk_encryption", 0): good.append("Full-disk encryption on devices.")
-    if chose("backup_frequency", 0): good.append("Frequent (daily/continuous) backups.")
-    if chose("backup_restore_test", 0): good.append("Backups are restore-tested.")
-    if chose("patching", 0): good.append("Automated patching is in place.")
-    if chose("av_edr", 0): good.append("AV/EDR deployed across devices.")
-    if chose("phishing_training", 0): good.append("Regular phishing/security training.")
-    if chose("ir_contacts", 0): good.append("Incident contacts/checklist documented.")
-
-    # Fixes (ordered by risk)
-    if not chose("mfa_all", 0):
-        fixes.append("Turn on **MFA** for email, cloud storage, accounting, and admin portals (today).")
-    if not chose("backup_frequency", 0):
-        fixes.append("Implement **3-2-1 backups** with at least one **immutable/offsite** copy.")
-    if not chose("disk_encryption", 0):
-        fixes.append("Enable **full-disk encryption** (BitLocker/FileVault) on all laptops/desktops.")
-    if not chose("patching", 0):
-        fixes.append("Enable **automatic updates** for OS and key apps; patch within ~14 days.")
-    if not chose("av_edr", 0):
-        fixes.append("Deploy **reputable AV/EDR** on all devices and ensure it’s updating.")
-    if not chose("ir_contacts", 0):
-        fixes.append("Create a **one-page incident checklist** with internal & vendor contacts.")
-    if not chose("phishing_training", 0):
-        fixes.append("Schedule **annual phishing/awareness training** (15–30 minutes).")
-    if not chose("email_filters", 0):
-        fixes.append("Enable **advanced email filtering** (malware/link protection) in your mail suite.")
-    if not chose("shared_accounts", 0):
-        fixes.append("Stop using **shared accounts**; give each person their own login.")
-    if not chose("admin_rights", 0):
-        fixes.append("Restrict **admin rights**; use separate admin accounts and review quarterly.")
-
-    # Context tweak
-    if initial.get("breach_contact") == "Not really sure" and \
-       "Create a **one-page incident checklist** with internal & vendor contacts." not in fixes:
-        fixes.insert(0, "Add **vendor breach contacts** to your incident checklist (host, payments, accountant).")
-
-    return good[:8], fixes[:10]
-
-def badge(colour: str, text: str) -> str:
-    return f'<span class="badge {colour}">{text}</span>'
+        # Fixes (risky or missing good practice)
+        risky_map = {
+            "click_link":"Don’t verify via links in alerts; navigate directly.",
+            "reply_email":"Don’t confirm via the same thread; attackers control replies.",
+            "comply_authority":"Don’t bypass approvals due to urgency/authority.",
+            "wait_and_see":"Act immediately on lost devices (lock/wipe, revoke).",
+            "do_nothing":"Remove public access; rotate links and review defaults."
+        }
+        for t in tags:
+            if t in risky_map: fixes.add(risky_map[t])
+        if "oob_verify" not in tags and scn["id"] in ("s1_invoice","s2_ceo"):
+            fixes.add("Introduce two-channel verification for payments and account changes.")
+        if scn["id"] == "s4_laptop" and not ({"remote_wipe","revoke_tokens"} & set(tags)):
+            fixes.add("Ensure MDM can remote-lock/wipe and revoke sessions quickly.")
+        if scn["id"] == "s3_reset" and not ({"nav_direct","report_button"} & set(tags)):
+            fixes.add("Enable an easy ‘report phishing’ button and teach ‘navigate, don’t click’.")
+        if scn["id"] == "s5_share" and "remove_public" not in tags:
+            fixes.add("Require expiring, least-privilege cloud links; disable ‘Anyone with link’.")
+    return sorted(list(strengths))[:8], sorted(list(fixes))[:10]
 
 # =========================================================
 # Sidebar (live snapshot)
@@ -500,18 +572,14 @@ if st.session_state.stage == "qa":
     with col_skip:
         if st.button("Skip", use_container_width=True):
             next_idx = idx + 1
-            if next_idx >= TOTAL:
-                st.session_state.stage = "done_initial"
-            else:
-                st.session_state.idx = next_idx
+            if next_idx >= TOTAL: st.session_state.stage = "done_initial"
+            else: st.session_state.idx = next_idx
             st.rerun()
     with col_next:
         if st.button("Save & Next →", type="primary", use_container_width=True):
             next_idx = idx + 1
-            if next_idx >= TOTAL:
-                st.session_state.stage = "done_initial"
-            else:
-                st.session_state.idx = next_idx
+            if next_idx >= TOTAL: st.session_state.stage = "done_initial"
+            else: st.session_state.idx = next_idx
             st.rerun()
 
 # =========================================================
@@ -558,61 +626,97 @@ if st.session_state.stage == "done_initial":
             blindspots.append("Solid baseline. Next, validate backups, MFA, and incident basics.")
         for b in blindspots: st.markdown(f"- {b}")
 
-    st.info("Next: Cybersecurity Posture (controls like MFA, backups, patching, awareness, incident response).")
-    if st.button("→ Continue to Cybersecurity Posture", type="primary"):
-        st.session_state.stage = "cyber_qa"
-        st.session_state.cyber_idx = 0
+    st.info("Next: short, safe simulations that test instincts and controls.")
+    if st.button("→ Continue to Simulations", type="primary"):
+        st.session_state.stage = "sim_qa"
+        st.session_state.sim_idx = 0
         st.rerun()
 
 # =========================================================
-# Stage 2: Cybersecurity Posture – Wizard
+# Stage 2: Simulation Wizard
 # =========================================================
-if st.session_state.stage == "cyber_qa":
-    i = st.session_state.cyber_idx
-    q = CYBER_QUESTIONS[i]
-    st.progress(i / max(CYBER_TOTAL, 1), text=f"Cybersecurity Posture • {q['domain']} • {i+1}/{CYBER_TOTAL}")
+def render_scenario(i: int):
+    scn = SCENARIOS[i]
+    st.progress(i / max(SIM_TOTAL,1), text=f"Simulation • {scn['title']} • {i+1}/{SIM_TOTAL}")
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown(f'<div class="qtitle">{q["text"]}</div>', unsafe_allow_html=True)
-    if q.get("tip"):
-        with st.expander("Why this matters"):
-            st.markdown(q["tip"])
+    st.subheader(scn["title"])
+    st.write(scn["narrative"])
+    if scn.get("evidence"):
+        st.markdown('<div class="evidence">', unsafe_allow_html=True)
+        for e in scn["evidence"]:
+            st.markdown(f"- {e}")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    curr = st.session_state.cyber_answers.get(q["id"])
-    answer = st.radio("Select one:", q["choices"],
-                      index=(q["choices"].index(curr) if curr in q["choices"] else 0),
-                      key=f"cy_radio_{q['id']}")
-    st.session_state.cyber_answers[q["id"]] = answer
+    # selections (persist with unique keys)
+    cues_cfg, act_cfg = scn["tasks"]["cues"], scn["tasks"]["actions"]
+    sel_cues = st.multiselect(cues_cfg["prompt"], [o["text"] for o in cues_cfg["options"]],
+                              default=st.session_state.sim_answers.get(scn["id"],{}).get("cues", []),
+                              max_selections=cues_cfg["max_select"], key=f"cues_{scn['id']}")
+    sel_actions = st.multiselect(act_cfg["prompt"], [o["text"] for o in act_cfg["options"]],
+                                 default=st.session_state.sim_answers.get(scn["id"],{}).get("actions", []),
+                                 max_selections=act_cfg["max_select"], key=f"actions_{scn['id']}")
+    conf_rng = scn["tasks"]["confidence"]["range"]
+    conf_default = scn["tasks"]["confidence"]["default"]
+    confidence = st.slider(scn["tasks"]["confidence"]["prompt"], conf_rng[0], conf_rng[1],
+                           value=st.session_state.sim_answers.get(scn["id"],{}).get("confidence", conf_default),
+                           key=f"conf_{scn['id']}")
+
+    # live feedback
+    ev = evaluate_scenario(scn, sel_cues, sel_actions, confidence)
+    with st.expander("Debrief (preview)"):
+        st.markdown(f"**Scores:** cues {ev['cues_score']} • actions {ev['actions_score']} • combined {ev['base']}")
+        if ev["good_actions"]:
+            st.markdown("**Good moves**")
+            st.markdown("<ul class='tight'>" + "".join([f"<li>{g}</li>" for g in ev["good_actions"]]) + "</ul>", unsafe_allow_html=True)
+        if ev["risky_actions"]:
+            st.markdown("**Risky choices**")
+            st.markdown("<ul class='tight'>" + "".join([f"<li>{g}</li>" for g in ev["risky_actions"]]) + "</ul>", unsafe_allow_html=True)
+        if ev["missed_cues"]:
+            st.markdown(f"**Cues you may have missed:** {', '.join(ev['missed_cues'])}")
+        if scn.get("hint_fix"): st.caption("Hint: " + scn["hint_fix"])
+
     st.markdown('</div>', unsafe_allow_html=True)
+    return scn, sel_cues, sel_actions, confidence
+
+if st.session_state.stage == "sim_qa":
+    i = st.session_state.sim_idx
+    scn, sel_cues, sel_actions, confidence = render_scenario(i)
 
     col_prev, col_skip, col_next = st.columns([1,1,1])
     with col_prev:
         if st.button("← Back", use_container_width=True, disabled=(i == 0)):
-            st.session_state.cyber_idx = max(i - 1, 0); st.rerun()
+            st.session_state.sim_idx = max(i - 1, 0); st.rerun()
     with col_skip:
         if st.button("Skip", use_container_width=True):
-            next_i = i + 1
-            if next_i >= CYBER_TOTAL:
-                st.session_state.stage = "cyber_results"
-            else:
-                st.session_state.cyber_idx = next_i
+            st.session_state.sim_answers.pop(scn["id"], None)
+            nxt = i + 1
+            if nxt >= SIM_TOTAL: st.session_state.stage = "sim_results"
+            else: st.session_state.sim_idx = nxt
             st.rerun()
     with col_next:
         if st.button("Save & Next →", type="primary", use_container_width=True):
-            next_i = i + 1
-            if next_i >= CYBER_TOTAL:
-                st.session_state.stage = "cyber_results"
-            else:
-                st.session_state.cyber_idx = next_i
+            st.session_state.sim_answers[scn["id"]] = {
+                "cues": sel_cues,
+                "actions": sel_actions,
+                "confidence": confidence
+            }
+            nxt = i + 1
+            if nxt >= SIM_TOTAL: st.session_state.stage = "sim_results"
+            else: st.session_state.sim_idx = nxt
             st.rerun()
 
 # =========================================================
-# Stage 2: Results – KPIs + Actions + Export
+# Results — Traffic Lights + Behaviour + Export
 # =========================================================
-if st.session_state.stage == "cyber_results":
-    st.success("Cybersecurity Posture assessment complete.")
-    scores = compute_domain_scores(st.session_state.cyber_answers)
+def badge(colour: str, text: str) -> str:
+    return f'<span class="badge {colour}">{text}</span>'
+
+if st.session_state.stage == "sim_results":
+    st.success("Simulations complete.")
+    scores = compute_domain_scores_from_sims(st.session_state.sim_answers)
     overall = overall_score(scores)
+    strengths, fixes = strengths_and_fixes(st.session_state.sim_answers)
 
     # Overall KPI
     st.markdown('<div class="kpi">', unsafe_allow_html=True)
@@ -620,12 +724,13 @@ if st.session_state.stage == "cyber_results":
         f"#### Overall posture: {badge(overall['colour'], overall['label'])}  •  **{overall['score']}%**",
         unsafe_allow_html=True
     )
-    st.caption("Scores reflect practical control coverage and are intended to guide priorities, not replace audits.")
+    st.caption("Scores reflect choices in scenarios and are intended to guide priorities, not replace audits.")
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Domain KPIs
     dcols = st.columns(3)
-    for idx, (dom, data) in enumerate(scores.items()):
+    for idx, dom in enumerate(DOMAINS):
+        data = scores.get(dom, {"score":0,"colour":"red","label":"At risk"})
         with dcols[idx % 3]:
             st.markdown('<div class="kpi">', unsafe_allow_html=True)
             st.markdown(f"**{dom}**")
@@ -634,37 +739,34 @@ if st.session_state.stage == "cyber_results":
 
     st.markdown("---")
 
-    good, fixes = add_action_cards(st.session_state.answers, st.session_state.cyber_answers)
-
     colA, colB = st.columns(2)
     with colA:
         st.markdown("### ✅ What you’re doing well")
-        if good:
-            st.markdown("<ul class='tight'>" + "".join([f"<li>{g}</li>" for g in good]) + "</ul>", unsafe_allow_html=True)
+        if strengths:
+            st.markdown("<ul class='tight'>" + "".join([f"<li>{g}</li>" for g in strengths]) + "</ul>", unsafe_allow_html=True)
         else:
-            st.write("We didn’t detect specific strengths yet — once you implement the fixes below, this list will grow.")
-
+            st.write("We didn’t detect specific strengths yet — once you apply the fixes below, this list will grow.")
     with colB:
         st.markdown("### 🛠 Top recommended fixes")
         if fixes:
             st.markdown("<ul class='tight'>" + "".join([f"<li>{f}</li>" for f in fixes]) + "</ul>", unsafe_allow_html=True)
         else:
-            st.write("Great baseline! Keep policies current and review quarterly.")
+            st.write("Great baseline! Keep processes current and review quarterly.")
 
     # Export
     st.markdown("---")
-    st.info("Tip: capture this page as PDF for your records, or download JSON/CSV below.")
+    st.info("Download results for your records.")
     export_payload = {
         "profile": st.session_state.profile,
         "initial_answers": st.session_state.answers,
-        "cyber_answers": st.session_state.cyber_answers,
+        "sim_answers": st.session_state.sim_answers,
         "domain_scores": scores,
         "overall": overall,
-        "strengths": good,
+        "strengths": strengths,
         "fixes": fixes
     }
     st.download_button("⬇️ Download JSON", data=json.dumps(export_payload, indent=2),
-                       file_name="sme_assessment_results.json", mime="application/json")
+                       file_name="sme_sim_results.json", mime="application/json")
 
     df = pd.DataFrame([{"Domain": d, "Score": v["score"], "Label": v["label"]} for d, v in scores.items()])
     csv_buf = StringIO(); df.to_csv(csv_buf, index=False)
@@ -673,8 +775,8 @@ if st.session_state.stage == "cyber_results":
 
     c1, c2 = st.columns([1,1])
     with c1:
-        if st.button("← Review answers"):
-            st.session_state.stage = "cyber_qa"; st.session_state.cyber_idx = 0; st.rerun()
+        if st.button("← Review scenarios"):
+            st.session_state.stage = "sim_qa"; st.session_state.sim_idx = 0; st.rerun()
     with c2:
         if st.button("Restart whole assessment"):
             reset_all(); st.rerun()
